@@ -1,7 +1,8 @@
 # Compte Rendu — TP1 : Plateforme & Docker avancé
 **Mastère Expert IT — CI/CD & DevSecOps**  
 **Groupe :** gGODON-DAUVEL  
-**Date :** 08 juin 2026
+**Date :** 08 juin 2026  
+**Lien GitHub :** [CI-CD_SemaineIntensive](https://github.com/CorentinG21/CI-CD_SemaineIntensive.git)
 
 ---
 
