@@ -76,23 +76,22 @@ Le fichier `compose.yaml` déclare les quatre services, un réseau commun `tp-ne
 services:
   api:
     build: ./api
-    env_file: .env
+    env_file:
+      - .env
     depends_on:
       db:
         condition: service_healthy
-      cache:
-        condition: service_started
     networks:
       - tp-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 5s
       retries: 5
 
   db:
     image: postgres:16
-    env_file: .env
+    env_file:
+      - .env
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
@@ -100,7 +99,6 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U app"]
       interval: 5s
-      timeout: 5s
       retries: 5
 
   cache:
@@ -110,14 +108,15 @@ services:
 
   proxy:
     image: nginx:1.27
+    depends_on:
+      api:
+        condition: service_healthy
     volumes:
       - ./proxy/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "8081:80"
     networks:
       - tp-net
-    depends_on:
-      - api
 
 networks:
   tp-net:
@@ -154,11 +153,12 @@ db:
 ```yaml
 api:
   healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-    interval: 10s
-    timeout: 5s
+    test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+    interval: 5s
     retries: 5
 ```
+
+> `curl` n'est pas installé dans l'image de base de l'API. On utilise donc le module `urllib` de la bibliothèque standard Python, disponible sans dépendance supplémentaire.
 
 ### Dépendance conditionnelle
 
@@ -232,14 +232,18 @@ Plutôt que de maintenir deux fichiers `compose.yaml` complets (risque de désyn
 services:
   api:
     volumes:
-      - ./api:/app
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+      - ./api/app:/app/app
     ports:
       - "8000:8000"
+
+  db:
+    ports:
+      - "5432:5432"
 ```
 
-- **Montage du code source** (`./api:/app`) : les modifications sont immédiatement prises en compte sans rebuild.
+- **Montage du code source** (`./api/app:/app/app`) : seul le répertoire applicatif est monté, les modifications sont immédiatement prises en compte sans rebuild.
 - **Port 8000 exposé** : accès direct à l'API pour le debug, sans passer par le proxy.
+- **Port 5432 exposé** : accès direct à PostgreSQL depuis l'hôte (ex. avec un client comme DBeaver ou psql) pour faciliter le debug en développement.
 
 ### `compose.prod.yaml` — Production (chargé explicitement)
 
@@ -247,27 +251,37 @@ services:
 services:
   api:
     restart: always
-    deploy:
-      resources:
-        limits:
-          cpus: "0.50"
-          memory: 256M
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-
-  db:
-    restart: always
     deploy:
       resources:
         limits:
           cpus: "0.50"
-          memory: 512M
+          memory: 256M
+
+  db:
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
 
   cache:
     restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:
@@ -276,6 +290,16 @@ services:
 
   proxy:
     restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
 ```
 
 **Lancement en production :**
@@ -301,9 +325,9 @@ docker compose up
 | Service | CPU max | Mémoire max |
 |---|---|---|
 | `api` | 0.50 core | 256 MB |
-| `db` | 0.50 core | 512 MB |
+| `db` | 0.50 core | 256 MB |
 | `cache` | 0.25 core | 128 MB |
-| `proxy` | — | — |
+| `proxy` | 0.25 core | 64 MB |
 
 Ces limites évitent qu'un service monopolise les ressources de l'hôte en cas de pic de charge ou de fuite mémoire.
 
@@ -317,7 +341,7 @@ logging:
     max-file: "3"
 ```
 
-La rotation des logs est configurée pour conserver au maximum **3 fichiers de 10 MB** par conteneur, soit 30 MB maximum par service. Sans rotation, les logs peuvent saturer le disque en production.
+La rotation des logs est configurée pour **tous les services** (`api`, `db`, `cache`, `proxy`) et conserve au maximum **3 fichiers de 10 MB** par conteneur, soit 30 MB maximum par service. Sans rotation, les logs peuvent saturer le disque en production.
 
 > Ces réglages sont réservés au profil production (`compose.prod.yaml`) : en développement, les logs sont illimités pour faciliter le debug.
 
