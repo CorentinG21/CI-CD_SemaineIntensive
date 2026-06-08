@@ -113,7 +113,7 @@ services:
     volumes:
       - ./proxy/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
-      - "8080:80"
+      - "8081:80"
     networks:
       - tp-net
     depends_on:
