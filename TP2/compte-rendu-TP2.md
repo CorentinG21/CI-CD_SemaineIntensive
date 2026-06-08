@@ -233,13 +233,12 @@ services:
   api:
     volumes:
       - ./api:/app
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "8000:8000"
 ```
 
 - **Montage du code source** (`./api:/app`) : les modifications sont immédiatement prises en compte sans rebuild.
-- **`--reload`** : rechargement automatique d'uvicorn à chaque modification de fichier.
 - **Port 8000 exposé** : accès direct à l'API pour le debug, sans passer par le proxy.
 
 ### `compose.prod.yaml` — Production (chargé explicitement)
