@@ -37,13 +37,13 @@ L'application de référence est composée de quatre services :
                          ┌─────────────────────────────────┐
                          │   Réseau user-defined : tp-net  │
                          │                                 │
-  ┌──────────┐           │  ┌──────────┐  ┌─────────────┐ │
-  │  Client  │──HTTP────►│  │   api    │  │     db      │ │
-  └──────────┘           │  │(FastAPI) │◄─┤ (postgres)  │ │
-                         │  └────┬─────┘  └─────────────┘ │
+  ┌──────────┐           │  ┌──────────┐  ┌─────────────┐  │
+  │  Client  │──HTTP────►│  │   api    │  │     db      │  │
+  └──────────┘           │  │(FastAPI) │◄─┤ (postgres)  │  │
+                         │  └────┬─────┘  └─────────────┘  │
                          │       │        ┌─────────────┐  │
                          │       └───────►│    redis    │  │
-                         │               └─────────────┘  │
+                         │                └─────────────┘  │
                          └─────────────────────────────────┘
 ```
 
@@ -140,21 +140,24 @@ WORKDIR /app
 
 # On copie d'abord les dépendances (contenu stable) pour bénéficier du cache
 COPY requirements.txt .
-RUN pip install --prefix=/install -r requirements.txt
+RUN pip install --prefix=/install --no-cache-dir -r requirements.txt
 
 # ── Stage 2 : exécution ─────────────────────────────────────────────────────
 FROM python:3.12-slim
 WORKDIR /app
 
+# Mise à jour des paquets système pour réduire les vulnérabilités
+RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Récupération uniquement des artefacts de build
 COPY --from=build /install /usr/local
-COPY . .
+COPY app/ app/
 
 # Utilisateur non-root (phase 7)
 RUN useradd -r -u 10001 appuser
 USER appuser
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 ### Fichier .dockerignore
@@ -310,14 +313,14 @@ Les images ont été taguées et publiées dans le registry intégré du projet 
 
 docker login 51.15.211.47:5050 -u root
 
-docker tag api-tp1:apres   51.15.211.47:5050/tp1-ggodon-dauvel/api:tp1
-docker push                51.15.211.47:5050/tp1-ggodon-dauvel/api:tp1
+docker tag api-tp1:apres   51.15.211.47:5050/root/tp1-ggodon-dauvel/api:tp1
+docker push                51.15.211.47:5050/root/tp1-ggodon-dauvel/api:tp1
 
-docker tag db-tp1:latest   51.15.211.47:5050/tp1-ggodon-dauvel/db:tp1
-docker push                51.15.211.47:5050/tp1-ggodon-dauvel/db:tp1
+docker tag db-tp1:latest   51.15.211.47:5050/root/tp1-ggodon-dauvel/db:tp1
+docker push                51.15.211.47:5050/root/tp1-ggodon-dauvel/db:tp1
 
-docker tag proxy-tp1:latest 51.15.211.47:5050/tp1-ggodon-dauvel/proxy:tp1
-docker push                 51.15.211.47:5050/tp1-ggodon-dauvel/proxy:tp1
+docker tag proxy-tp1:latest 51.15.211.47:5050/root/tp1-ggodon-dauvel/proxy:tp1
+docker push                 51.15.211.47:5050/root/tp1-ggodon-dauvel/proxy:tp1
 ```
 
 **Capture 9 — Registry listant les trois images**
@@ -393,4 +396,3 @@ Si le champ est vide (`-` ou absent), cela signifie que **aucun correctif n'est 
 
 ---
 
-*Compte rendu rédigé par Corentin Godon — Groupe gGODON-DAUVEL*
