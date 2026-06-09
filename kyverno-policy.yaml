@@ -1,0 +1,27 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verifier-signature
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: verify-api
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      verifyImages:
+        - imageReferences:
+            - "rg.fr-par.scw.cloud/ggodon-dauvel/*"
+          imageRegistryCredentials:
+            secrets:
+              - scaleway-registry-secret
+            allowInsecureRegistry: false
+          attestors:
+            - entries:
+                - keys:
+                    publicKeys: |-
+                      -----BEGIN PUBLIC KEY-----
+                      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEBevcpknZrJ3Gh0kQV7Ja1JwHuPkL
+                      +MFt0KjUlwbPVLUe6F0Hq+/r1jjZ+AASZ8QQuKt9ncrC4wMf1yV8+u02vA==
+                      -----END PUBLIC KEY-----

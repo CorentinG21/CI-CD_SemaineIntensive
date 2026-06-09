@@ -1,0 +1,18 @@
+replicaCount: 2
+
+image:
+  repository: rg.fr-par.scw.cloud/ggodon-dauvel/api
+  tag: "d87fc0da"
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  port: 8000
+
+resources:
+  requests:
+    cpu: "250m"
+    memory: "256Mi"
+  limits:
+    cpu: "1000m"
+    memory: "512Mi"

@@ -1,0 +1,61 @@
+image:
+  repository: rg.fr-par.scw.cloud/ggodon-dauvel/api
+  tag: "d87fc0da"
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations: {}
+  hosts:
+    - host: api.ggodon-dauvel.local
+      paths:
+        - path: /
+          pathType: Prefix
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+
+db:
+  image: postgres:16
+  password: postgres
+
+cache:
+  image: redis:7
+
+livenessProbe:
+  exec:
+    command: ["true"]
+
+readinessProbe:
+  exec:
+    command: ["true"]
+
+serviceAccount:
+  create: false
+  name: ""
+
+httpRoute:
+  enabled: false
+
+autoscaling:
+  enabled: false
+
+imagePullSecrets:
+  - name: scaleway-registry-secret
+
+podSecurityContext: {}
+
+securityContext:
+  allowPrivilegeEscalation: false
