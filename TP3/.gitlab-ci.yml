@@ -1,0 +1,102 @@
+stages:
+  - build
+  - test
+  - quality
+  - security
+  - sign
+  - deploy
+
+variables:
+  IMAGE: "$CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHORT_SHA"
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_HOST: tcp://docker:2375
+
+build:
+  stage: build
+  image: docker:27
+  services:
+    - name: docker:27-dind
+      command: ["--insecure-registry", "51.15.211.47:5050", "--tls=false"]
+  script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - docker build -t "$IMAGE" ./api
+    - docker push "$IMAGE"
+
+test:
+  stage: test
+  image: python:3.12-slim
+  script:
+    - pip install -r api/requirements.txt
+    - cd api && PYTHONPATH=. pytest -q
+
+sonar:
+  stage: quality
+  image: sonarsource/sonar-scanner-cli:latest
+  script:
+    - sonar-scanner
+      -Dsonar.projectKey=tp1-ggodon-dauvel
+      -Dsonar.sources=api
+      -Dsonar.host.url=$SONAR_HOST_URL
+      -Dsonar.token=$SONAR_TOKEN
+
+trivy:
+  stage: security
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - trivy fs --exit-code 0 --severity HIGH,CRITICAL ./api
+
+gitleaks:
+  stage: security
+  image:
+    name: zricethezav/gitleaks:latest
+    entrypoint: [""]
+  script:
+    - gitleaks detect --source . --no-git -v --exit-code 0
+
+sbom:
+  stage: security
+  image: alpine:latest
+  script:
+    - apk add --no-cache curl
+    - curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+    - syft ./api -o spdx-json > sbom.json
+  artifacts:
+    paths:
+      - sbom.json
+
+semgrep:
+  stage: security
+  image: semgrep/semgrep:latest
+  script:
+    - semgrep scan --config auto api/
+
+sign:
+  stage: sign
+  image: alpine:latest
+  variables:
+    COSIGN_INSECURE_SKIP_TLS_VERIFY: "true"
+  script:
+    - apk add --no-cache curl
+    - curl -sSfL https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64 -o /usr/local/bin/cosign
+    - chmod +x /usr/local/bin/cosign
+    - cosign login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD"
+    - COSIGN_PASSWORD="$COSIGN_PASSWORD" cosign sign --key "$COSIGN_PRIVATE_KEY" --yes --allow-insecure-registry --allow-http-registry "$IMAGE"
+    - cosign verify --key cosign.pub --allow-insecure-registry --allow-http-registry "$IMAGE"
+
+deploy_staging:
+  stage: deploy
+  image: alpine:latest
+  environment: staging
+  only:
+    - master
+  script:
+    - apk add --no-cache openssh-client
+    - chmod 600 "$SSH_PRIVATE_KEY"
+    - ssh -i "$SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no root@$STAGING_IP "
+        docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY &&
+        docker pull $IMAGE &&
+        docker rm -f api 2>/dev/null || true &&
+        docker run -d --name api --restart always -p 8000:8000 $IMAGE
+      "

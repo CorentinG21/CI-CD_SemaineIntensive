@@ -1,0 +1,40 @@
+pipeline {
+    agent any
+    stages {
+        stage('Build') {
+            steps {
+                sh 'docker build -t api ./api'
+            }
+        }
+        stage('Test') {
+            steps {
+                sh 'pip install -r api/requirements.txt'
+                sh 'cd api && PYTHONPATH=. pytest -q'
+            }
+        }
+        stage('Scan') {
+            steps {
+                sh 'trivy image api'
+            }
+        }
+        stage('Deploy') {
+            when {
+                branch 'master'
+            }
+            steps {
+                sh 'echo "Deploy to staging"'
+            }
+        }
+    }
+    post {
+        always {
+            cleanWs()
+        }
+        success {
+            echo 'Pipeline passed !'
+        }
+        failure {
+            echo 'Pipeline failed !'
+        }
+    }
+}
