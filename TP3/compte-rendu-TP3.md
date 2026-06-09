@@ -192,11 +192,16 @@ La clé privée (`cosign.key`) et son mot de passe sont stockés en **variables 
 ```yaml
 sign:
   stage: sign
-  image: gcr.io/projectsigstore/cosign:latest
+  image: alpine:latest
+  variables:
+    COSIGN_INSECURE_SKIP_TLS_VERIFY: "true"
   script:
-    - echo "$COSIGN_PRIVATE_KEY" > cosign.key
-    - cosign sign --key cosign.key --yes "$IMAGE"
-    - cosign verify --key cosign.pub "$IMAGE"
+    - apk add --no-cache curl
+    - curl -sSfL https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64 -o /usr/local/bin/cosign
+    - chmod +x /usr/local/bin/cosign
+    - cosign login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD"
+    - COSIGN_PASSWORD="$COSIGN_PASSWORD" cosign sign --key "$COSIGN_PRIVATE_KEY" --yes --allow-insecure-registry --allow-http-registry "$IMAGE"
+    - cosign verify --key cosign.pub --allow-insecure-registry --allow-http-registry "$IMAGE"
 ```
 
 Les logs du job confirment : *"The signatures were verified against the specified public key"*. La signature est stockée dans le registry sous forme d'une image OCI annexe liée au digest de l'image principale.
@@ -264,11 +269,19 @@ Le pipeline #23 (`d74ee61b`) est le premier à comporter les 9 jobs complets : `
 ```yaml
 deploy_staging:
   stage: deploy
+  image: alpine:latest
   environment: staging
-  only: [master]
+  only:
+    - master
   script:
-    - ssh user@<IP_staging> "docker compose -f compose.yaml -f compose.prod.yaml pull &&
-        docker compose -f compose.yaml -f compose.prod.yaml up -d"
+    - apk add --no-cache openssh-client
+    - chmod 600 "$SSH_PRIVATE_KEY"
+    - ssh -i "$SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no root@$STAGING_IP "
+        docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY &&
+        docker pull $IMAGE &&
+        docker rm -f api 2>/dev/null || true &&
+        docker run -d --name api --restart always -p 8000:8000 $IMAGE
+      "
 ```
 
 Les logs du job `deploy_staging` confirment : *"This job is deployed to staging."* Le job se connecte en SSH à l'instance staging, récupère la nouvelle image depuis le registry (`docker compose pull`) puis relance le stack en mode détaché (`up -d`). La clé SSH est injectée depuis une variable CI protégée et n'apparaît jamais dans les logs.
