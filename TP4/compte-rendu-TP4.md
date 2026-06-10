@@ -364,7 +364,12 @@ Un `securityContext` a été ajouté au déploiement de l'API pour réduire la s
 podSecurityContext: {}
  
 securityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
   allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
 ```
  
 > **Note :** Les paramètres `runAsNonRoot: true`, `readOnlyRootFilesystem: true` et `capabilities: drop: ALL` ont été testés mais l'image API actuelle tourne en root et requiert des capabilities système pour démarrer. Un rebuild de l'image avec un utilisateur non-root dans le Dockerfile serait nécessaire pour appliquer l'intégralité du durcissement.
@@ -389,7 +394,8 @@ securityContext:
  
 **Capture 7 — Image non signée refusée par Kyverno**
  
-![Capture 7](Captures/Phase7/capture7_image_non_signee_refusee.png)
+![Capture 7a](Captures/Phase7/capture7_image_non_signee_refusee.png)
+![Capture 7b](Captures/Phase7/capture7_image_signee_acceptee.png)
  
 Kyverno a été installé via Helm :
  
@@ -427,7 +433,7 @@ spec:
               kinds: [Pod]
       verifyImages:
         - imageReferences:
-            - "rg.fr-par.scw.cloud/ggodon-dauvel/*"
+            - "rg.fr-par.scw.cloud/ggodon-dauvel/api@sha256:*"
           imageRegistryCredentials:
             secrets:
               - scaleway-registry-secret
