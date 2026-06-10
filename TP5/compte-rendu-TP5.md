@@ -159,16 +159,16 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/CorentinG21/CI-CD_SemaineIntensive.git
-    path: chart
-    targetRevision: main
-    helm:
-      valueFiles:
-        - values-staging.yaml
+    repoURL: http://51.15.211.47/root/tp1-ggodon-dauvel.git
+    path: chart/chart
+    targetRevision: master
   destination:
     server: https://kubernetes.default.svc
     namespace: ggodon-dauvel
   syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
     syncOptions:
       - CreateNamespace=true
 ```
@@ -197,38 +197,33 @@ Après synchronisation, l'application apparaît **Synced** et **Healthy** dans l
 
 ![Capture 3](Captures/Phase3/capture3_argocd_selfheal.png)
 
-La politique de synchronisation automatique avec self-heal et pruning a été activée sur l'application :
+La politique de synchronisation automatique avec self-heal et pruning a été activée en modifiant la ressource `Application` ArgoCD :
 
 ```yaml
 syncPolicy:
   automated:
     selfHeal: true
     prune: true
+  syncOptions:
+    - CreateNamespace=true
 ```
 
-Application de la politique :
-
 ```bash
-argocd app set app-ggodon-dauvel \
-  --sync-policy automated \
-  --self-heal \
-  --auto-prune
+kubectl apply -f argocd-app.yaml
 ```
 
 **Démonstration de la dérive et de la réconciliation :**
 
-Une modification manuelle a été provoquée en changeant le nombre de réplicas directement sur le cluster :
+Une modification manuelle a été provoquée en scalant le Rollout directement sur le cluster :
 
 ```bash
-kubectl scale deployment app-ggodon-dauvel \
-  --replicas=3 \
+kubectl scale rollout app-ggodon-dauvel-chart \
+  --replicas=0 \
   -n ggodon-dauvel
-# → 3 pods Running (dérive : Git déclare 1 réplica)
+# → 0 pods Running (dérive : Git déclare 1 réplica)
 ```
 
-Quelques secondes plus tard, ArgoCD a détecté la dérive (statut **OutOfSync**) et a automatiquement réconcilié le cluster vers l'état Git (1 réplica). La capture montre la transition OutOfSync → Synced et le retour à 1 pod.
-
----
+Quelques secondes plus tard, ArgoCD a détecté la dérive (statut **OutOfSync**) et a automatiquement réconcilié le cluster vers l'état Git. La capture montre un pod en **terminating** (l'ancien pod supprimé) et un nouveau pod **running 1/1** recréé par ArgoCD.
 
 ## 5. Phase 4 — Rollback déclaratif
 
@@ -336,7 +331,7 @@ La progression a été observée : 25 % du trafic vers la nouvelle version penda
 ![Capture 6a](Captures/Phase6/capture6_vault_secret_eso.png)
 ![Capture 6b](Captures/Phase6/capture6_gitlab_no_secret.png)
 
-**Installation de Vault (OSS) :**
+**Installation de Vault (OSS) en mode dev :**
 
 ```bash
 helm repo add hashicorp https://helm.releases.hashicorp.com
@@ -349,9 +344,9 @@ helm install vault hashicorp/vault \
 **Écriture du secret applicatif dans Vault :**
 
 ```bash
-kubectl exec -n vault vault-0 -- vault kv put \
+kubectl exec -it vault-0 -n vault -- vault kv put \
   secret/ggodon-dauvel/db \
-  password=S3cr3tP@ssw0rd
+  password=supersecret123
 ```
 
 **Installation de l'External Secrets Operator :**
@@ -363,10 +358,34 @@ helm install external-secrets external-secrets/external-secrets \
   --create-namespace
 ```
 
-**Configuration du ClusterSecretStore :**
+**Création de la politique Vault et du token ESO :**
+
+```bash
+kubectl exec -it vault-0 -n vault -- vault policy write eso-policy - <<EOF
+path "secret/data/ggodon-dauvel/*" {
+  capabilities = ["read"]
+}
+EOF
+
+kubectl exec -it vault-0 -n vault -- vault token create \
+  -policy=eso-policy \
+  -format=json
+```
+
+Le token généré est stocké dans un Secret Kubernetes dans le namespace `ggodon-dauvel` :
+
+```bash
+kubectl create secret generic vault-token \
+  -n ggodon-dauvel \
+  --from-literal=token="<VAULT_TOKEN>"
+```
+
+> Le vrai token n'est jamais committé dans le dépôt Git — il est uniquement stocké comme Secret Kubernetes.
+
+**Configuration du ClusterSecretStore et ExternalSecret :**
 
 ```yaml
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ClusterSecretStore
 metadata:
   name: vault-backend
@@ -377,46 +396,18 @@ spec:
       path: "secret"
       version: "v2"
       auth:
-        kubernetes:
-          mountPath: "kubernetes"
-          role: "external-secrets"
-          serviceAccountRef:
-            name: external-secrets
-            namespace: external-secrets
-```
-
-**Configuration de l'authentification Kubernetes dans Vault :**
-
-```bash
-kubectl exec -n vault vault-0 -- vault auth enable kubernetes
-
-kubectl exec -n vault vault-0 -- vault write auth/kubernetes/config \
-  kubernetes_host="https://kubernetes.default.svc"
-
-kubectl exec -n vault vault-0 -- vault policy write external-secrets - <<EOF
-path "secret/data/ggodon-dauvel/*" {
-  capabilities = ["read"]
-}
-EOF
-
-kubectl exec -n vault vault-0 -- vault write \
-  auth/kubernetes/role/external-secrets \
-  bound_service_account_names=external-secrets \
-  bound_service_account_namespaces=external-secrets \
-  policies=external-secrets \
-  ttl=24h
-```
-
-**Déclaration de l'ExternalSecret :**
-
-```yaml
-apiVersion: external-secrets.io/v1beta1
+        tokenSecretRef:
+          name: vault-token
+          namespace: ggodon-dauvel
+          key: token
+---
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: db-credentials
+  name: db-secret
   namespace: ggodon-dauvel
 spec:
-  refreshInterval: 1h
+  refreshInterval: 1m
   secretStoreRef:
     name: vault-backend
     kind: ClusterSecretStore
@@ -430,14 +421,16 @@ spec:
         property: password
 ```
 
-L'ESO crée automatiquement un `Secret` Kubernetes `db-credentials` dans le namespace `ggodon-dauvel`, consommé par l'application via `envFrom`. Le secret matérialisé n'est jamais committé dans le dépôt.
+Le statut **SecretSynced: True** confirme que l'ESO a bien récupéré le secret depuis Vault et l'a matérialisé en Secret Kubernetes `db-credentials`. Le fichier `vault-eso.yaml` versionné dans le dépôt ne contient que la référence au chemin Vault — jamais la valeur du secret.
 
-**Vérification de l'absence de secret en clair dans le dépôt :**
+**Vérification :**
 
 ```bash
-# Aucun fichier ne contient de valeur sensible
-git grep -r "password" -- "*.yaml"
-# → Seules les références Vault (chemins) apparaissent, jamais les valeurs
+kubectl get externalsecret db-secret -n ggodon-dauvel
+# STATUS: SecretSynced   READY: True
+
+kubectl get secret db-credentials -n ggodon-dauvel
+# NAME: db-credentials   TYPE: Opaque   DATA: 1
 ```
 
 ---
