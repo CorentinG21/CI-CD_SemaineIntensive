@@ -27,37 +27,37 @@
 ```
   ┌──────────────────────────────────────────────────────────────────────┐
   │                      Dépôt Git (source de vérité)                    │
-  │  providers.tf  ·  main.tf  ·  modules/  ·  playbook.yml             │
-  │  *.tfvars.example (sans secrets)  ·  .gitignore (state + secrets)   │
+  │  providers.tf  ·  main.tf  ·  modules/  ·  playbook.yml              │
+  │  *.tfvars.example (sans secrets)  ·  .gitignore (state + secrets)    │
   └──────────────────────────────────┬───────────────────────────────────┘
                                      │  tofu plan / tofu apply
                                      ▼
   ┌──────────────────────────────────────────────────────────────────────┐
   │                         OpenTofu (IaC engine)                        │
   │                                                                      │
-  │  ┌─────────────────────────┐   ┌────────────────────────────────┐   │
-  │  │   Provider Scaleway     │   │   State Backend (Object S3)    │   │
-  │  │  (SCW_ACCESS_KEY, etc.) │   │   tfstate-iac-ggodon-dauvel    │   │
-  │  └────────────┬────────────┘   └────────────────────────────────┘   │
-  │               │ provisionne                                           │
-  │               ▼                                                       │
+  │  ┌─────────────────────────┐   ┌────────────────────────────────┐    │
+  │  │   Provider Scaleway     │   │   State Backend (Object S3)    │    │
+  │  │  (SCW_ACCESS_KEY, etc.) │   │   tfstate-iac-ggodon-dauvel    │    │
+  │  └────────────┬────────────┘   └────────────────────────────────┘    │
+  │               │ provisionne                                          │
+  │               ▼                                                      │
   │  ┌────────────────────────────────────────────────────────────────┐  │
-  │  │                  Scaleway (cloud provider)                      │  │
-  │  │                                                                  │  │
-  │  │   Instance iac-ggodon-dauvel          Cluster Kapsule           │  │
-  │  │   (ubuntu_jammy, GP1-XS)              kapsule-iac-ggodon-dauvel │  │
+  │  │                  Scaleway (cloud provider)                     │  │
+  │  │                                                                │  │
+  │  │   Instance iac-ggodon-dauvel          Cluster Kapsule          │  │
+  │  │   (ubuntu_jammy, DEV1-S)              kapsule-iac-ggodon-dauvel│  │
   │  │   IP publique routed_ipv4             2 nœuds DEV1-M, CNI Cilium│  │
-  │  │   SG: ports 22/80/443                 kubeconfig (sensitive)    │  │
-  │  │           │                                                      │  │
-  │  │     module "staging"     module "prod"                          │  │
-  │  │     (DEV1-M)             (GP1-XS)                               │  │
-  │  └────────────┬─────────────────────────────────────────────────┘  │
+  │  │   SG: ports 22/80/443                 kubeconfig (sensitive)   │  │
+  │  │           │                                                    │  │
+  │  │     module "staging"     module "prod"                         │  │
+  │  │     (DEV1-M)             (DEV1-S)                              │  │
+  │  └────────────┬───────────────────────────────────────────────────┘  │
   └───────────────┼──────────────────────────────────────────────────────┘
                   │  ansible-playbook (SSH, port 22)
                   ▼
   ┌──────────────────────────────────────────────────────────────────────┐
-  │                Ansible (configuration management)                     │
-  │  playbook.yml  →  Docker installé  ·  Runner GitLab installé        │
+  │                Ansible (configuration management)                    │
+  │  playbook.yml  →  Docker installé  ·  Runner GitLab installé         │
   │  Idempotent : 2e passage → changed=0                                 │
   └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -174,7 +174,7 @@ resource "scaleway_instance_ip" "public" {
 
 resource "scaleway_instance_server" "app" {
   name              = "iac-ggodon-dauvel"
-  type              = "GP1-XS"
+  type              = "DEV1-S"
   image             = "ubuntu_jammy"
   ip_id             = scaleway_instance_ip.public.id
   security_group_id = scaleway_instance_security_group.web.id
@@ -280,11 +280,11 @@ variable "ports" {
 
 ```hcl
 # modules/app-instance/outputs.tf
-output "ip_address" {
+output "ip" {
   value = scaleway_instance_ip.public.address
 }
 
-output "server_id" {
+output "id" {
   value = scaleway_instance_server.app.id
 }
 ```
@@ -302,11 +302,11 @@ module "staging" {
 module "prod" {
   source        = "./modules/app-instance"
   name          = "prod-iac-ggodon-dauvel"
-  instance_type = "GP1-XS"
+  instance_type = "DEV1-S"
 }
 
-output "staging_ip" { value = module.staging.ip_address }
-output "prod_ip"    { value = module.prod.ip_address }
+output "staging_ip" { value = module.staging.ip }
+output "prod_ip"    { value = module.prod.ip }
 ```
 
 **Point de contrôle :** Un même module produit deux environnements distincts ; les outputs IP sont affichés après `tofu apply`.
@@ -355,7 +355,7 @@ output "kubeconfig" {
 ```
 
 ```bash
-tofu apply -var="k8s_version=1.30.2"
+tofu apply -var="k8s_version=1.35.3"
 
 # Récupérer le kubeconfig et vérifier l'accès
 tofu output -raw kubeconfig > kubeconfig.yaml

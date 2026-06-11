@@ -1,0 +1,15 @@
+- hosts: all
+  become: true
+  tasks:
+    - name: Installer les dépendances
+      apt:
+        name:
+          - docker.io
+          - curl
+        update_cache: true
+
+    - name: Démarrer Docker
+      service:
+        name: docker
+        state: started
+        enabled: true
